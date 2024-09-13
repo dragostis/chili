@@ -55,7 +55,7 @@ fn no_overhead(bencher: Bencher, nodes: (usize, usize)) {
 }
 
 #[divan::bench(args = nodes())]
-fn overhead(bencher: Bencher, nodes: (usize, usize)) {
+fn spice_overhead(bencher: Bencher, nodes: (usize, usize)) {
     fn sum(node: &Node, scope: &mut Scope<'_>) -> u64 {
         let (left, right) = scope.join(
             |s| node.left.as_deref().map(|n| sum(n, s)).unwrap_or_default(),
