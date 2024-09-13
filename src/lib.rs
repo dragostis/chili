@@ -581,23 +581,29 @@ mod tests {
             thread_count: Some(2),
             heartbeat_interval: Duration::from_micros(1),
         })
-        .unwrap_or_else(|| {
-            // Pass test artificially when only one thread is available.
-            panic!("panicked across threads");
-        });
+        .unwrap();
 
-        fn increment(s: &mut Scope, slice: &mut [u32], id: ThreadId) {
+        if let Some(thread_count) = thread::available_parallelism().ok().map(NonZero::get) {
+            if thread_count == 1 {
+                // Pass test artificially when only one thread is available.
+                panic!("panicked across threads");
+            }
+        }
+
+        fn increment(s: &mut Scope, slice: &mut [ThreadId], id: ThreadId) {
             match slice.len() {
                 0 => (),
-                1 => slice[0] += 1,
                 _ => {
-                    let (_, tail) = slice.split_at_mut(1);
+                    let (head, tail) = slice.split_at_mut(1);
 
                     s.join(
                         |_| {
                             thread::sleep(Duration::from_micros(10));
 
-                            if thread::current().id() != id {
+                            let current_id = thread::current().id();
+                            head[0] = current_id;
+
+                            if current_id != id {
                                 panic!("panicked across threads");
                             }
                         },
@@ -607,8 +613,11 @@ mod tests {
             }
         }
 
-        let mut vals = [0; 10];
+        let mut vals = [thread::current().id(); 10];
 
         increment(&mut threat_pool.scope(), &mut vals, thread::current().id());
+
+        // Just in case this test fails.
+        panic!("thread IDs: {:?}", vals);
     }
 }
