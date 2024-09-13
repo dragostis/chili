@@ -1,6 +1,5 @@
 use std::{
     cell::{Cell, UnsafeCell},
-    hint,
     mem::ManuallyDrop,
     panic::{self, AssertUnwindSafe},
     ptr::{self, NonNull},
@@ -63,9 +62,7 @@ impl<T> Future<T> {
                 _ => (),
             }
 
-            // Spinning time should be short since the lock is held only to
-            // write the `Box<T>` and unpark this thread.
-            hint::spin_loop();
+            thread::yield_now();
         }
     }
 
@@ -82,9 +79,7 @@ impl<T> Future<T> {
 
             match result {
                 Ok(_) => break,
-                // Spinning time should be short since the lock is held only to
-                // write the thread to `self.waiting_thread`.
-                Err(_) => hint::spin_loop(),
+                Err(_) => thread::yield_now(),
             }
         }
 
