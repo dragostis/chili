@@ -156,7 +156,7 @@ impl<T> Job<T> {
             // `Future` in `self.fur_or_next` that should get passed here.
             let fut = unsafe { &*(fut as *const Future<T>) };
 
-            (*fut).complete(panic::catch_unwind(AssertUnwindSafe(|| f(scope))));
+            fut.complete(panic::catch_unwind(AssertUnwindSafe(|| f(scope))));
         }
 
         Self {
@@ -190,11 +190,18 @@ impl<T> Job<T> {
 
     /// It should only be called after being popped from a `JobQueue`.
     pub unsafe fn wait(&self) -> Option<thread::Result<T>> {
-        self.fut_or_next
-            .get()
-            // Before being popped, the `JobQueue` allocates and store a
+        self.fut_or_next.get().and_then(|fut| {
+            // Before being popped, the `JobQueue` allocates and stores a
             // `Future` in `self.fur_or_next` that should get passed here.
-            .and_then(|fut| unsafe { Box::from_raw(fut.as_ptr()).wait() })
+            let result = unsafe { (*fut.as_ptr()).wait() };
+            // We only can drop the `Box` *after* waiting on the `Future`
+            // in order to ensure unique access.
+            unsafe {
+                drop(Box::from_raw(fut.as_ptr()));
+            }
+
+            result
+        })
     }
 
     /// It should only be called in the case where the job has been popped
