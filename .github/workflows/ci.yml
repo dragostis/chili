@@ -57,4 +57,4 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - uses: taiki-e/install-action@nextest
       - run: cargo +nightly miri setup
-      - run: cargo +nightly miri test -- --skip join_very_long --skip join_panic
+      - run: cargo +nightly miri nextest run -j8 -E 'not (test(join_very_long))'
