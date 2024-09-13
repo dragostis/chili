@@ -156,7 +156,7 @@ impl<T> Job<T> {
             // `Future` in `self.fur_or_next` that should get passed here.
             let fut = unsafe { &*(fut as *const Future<T>) };
 
-            (*fut).complete(panic::catch_unwind(AssertUnwindSafe(|| f(scope))));
+            fut.complete(panic::catch_unwind(AssertUnwindSafe(|| f(scope))));
         }
 
         Self {
