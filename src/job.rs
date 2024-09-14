@@ -2,7 +2,7 @@ use std::{
     cell::{Cell, UnsafeCell},
     mem::ManuallyDrop,
     panic::{self, AssertUnwindSafe},
-    ptr::{self, NonNull},
+    ptr::NonNull,
     sync::atomic::{AtomicU8, Ordering},
     thread::{self, Thread},
 };
@@ -111,7 +111,7 @@ impl<F> JobStack<F> {
     }
 
     /// It should only be called once.
-    pub unsafe fn take_once(self) -> F {
+    pub unsafe fn take_once(&self) -> F {
         // No `Job` has has been executed, therefore `self.f` has not yet been
         // `take`n.
         unsafe { ManuallyDrop::take(&mut *self.f.get()) }
@@ -124,8 +124,8 @@ impl<F> JobStack<F> {
 /// thread boundaries.
 #[derive(Clone, Debug)]
 pub struct Job<T = ()> {
-    stack: *const JobStack,
-    harness: unsafe fn(&mut Scope<'_>, *const JobStack, *const Future),
+    stack: NonNull<JobStack>,
+    harness: unsafe fn(&mut Scope<'_>, NonNull<JobStack>, NonNull<Future>),
     prev: Cell<Option<NonNull<Self>>>,
     fut_or_next: Cell<Option<NonNull<Future<T>>>>,
 }
@@ -137,25 +137,28 @@ impl<T> Job<T> {
         T: Send,
     {
         /// It should only be called while the `stack` is still alive.
-        unsafe fn harness<F, T>(scope: &mut Scope<'_>, stack: *const JobStack, fut: *const Future)
-        where
+        unsafe fn harness<F, T>(
+            scope: &mut Scope<'_>,
+            stack: NonNull<JobStack>,
+            fut: NonNull<Future>,
+        ) where
             F: FnOnce(&mut Scope<'_>) -> T + Send,
             T: Send,
         {
             // The `stack` is still alive.
-            let stack = unsafe { &*(stack as *const JobStack<F>) };
-            // This is the first call to `take` the closure since
+            let stack: &JobStack<F> = unsafe { stack.cast().as_ref() };
+            // This is the first call to `take_once` the closure since
             // `Job::execute` is called only after the job has been popped.
-            let f = unsafe { ManuallyDrop::take(&mut *stack.f.get()) };
+            let f = unsafe { stack.take_once() };
             // Before being popped, the `JobQueue` allocates and store a
             // `Future` in `self.fur_or_next` that should get passed here.
-            let fut = unsafe { &*(fut as *const Future<T>) };
+            let fut: &Future<T> = unsafe { fut.cast().as_ref() };
 
             fut.complete(panic::catch_unwind(AssertUnwindSafe(|| f(scope))));
         }
 
         Self {
-            stack: stack as *const JobStack<F> as *const JobStack,
+            stack: NonNull::from(stack).cast(),
             harness: harness::<F, T>,
             prev: Cell::new(None),
             fut_or_next: Cell::new(None),
@@ -188,7 +191,7 @@ impl<T> Job<T> {
         self.fut_or_next.get().and_then(|fut| {
             // Before being popped, the `JobQueue` allocates and stores a
             // `Future` in `self.fur_or_next` that should get passed here.
-            let result = unsafe { (*fut.as_ptr()).wait() };
+            let result = unsafe { fut.as_ref().wait() };
             // We only can drop the `Box` *after* waiting on the `Future`
             // in order to ensure unique access.
             unsafe {
@@ -219,7 +222,7 @@ impl Job {
         // Before being popped, the `JobQueue` allocates and store a
         // `Future` in `self.fur_or_next` that should get passed here.
         unsafe {
-            (self.harness)(scope, self.stack, self.fut_or_next.get().unwrap().as_ptr());
+            (self.harness)(scope, self.stack, self.fut_or_next.get().unwrap());
         }
     }
 }
@@ -235,7 +238,7 @@ pub struct JobQueue {
 impl Default for JobQueue {
     fn default() -> Self {
         let root = Box::leak(Box::new(Job {
-            stack: ptr::null(),
+            stack: NonNull::dangling(),
             harness: |_, _, _| (),
             prev: Cell::new(None),
             fut_or_next: Cell::new(None),
@@ -357,7 +360,7 @@ mod tests {
     impl Job {
         pub fn from_usize(val: &'static usize) -> Self {
             Self {
-                stack: val as *const usize as *mut JobStack as *const JobStack,
+                stack: NonNull::from(val).cast(),
                 harness: |_, _, _| (),
                 prev: Cell::new(None),
                 fut_or_next: Cell::new(None),
@@ -365,7 +368,7 @@ mod tests {
         }
 
         pub fn as_usize(&self) -> usize {
-            unsafe { *(self.stack as *const usize) }
+            unsafe { *self.stack.cast().as_ref() }
         }
     }
 
