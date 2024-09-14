@@ -590,20 +590,21 @@ mod tests {
             }
         }
 
-        fn increment(s: &mut Scope, slice: &mut [ThreadId], id: ThreadId) {
+        fn increment(s: &mut Scope, slice: &mut [u32], id: ThreadId) -> bool {
+            let mut threads_crossed = AtomicBool::new(false);
+
             match slice.len() {
                 0 => (),
+                1 => slice[0] += 1,
                 _ => {
-                    let (head, tail) = slice.split_at_mut(1);
+                    let (_, tail) = slice.split_at_mut(1);
 
                     s.join(
                         |_| {
-                            thread::sleep(Duration::from_micros(10));
+                            thread::sleep(Duration::from_micros(100));
 
-                            let current_id = thread::current().id();
-                            head[0] = current_id;
-
-                            if current_id != id {
+                            if thread::current().id() != id {
+                                threads_crossed.store(true, Ordering::Relaxed);
                                 panic!("panicked across threads");
                             }
                         },
@@ -611,13 +612,22 @@ mod tests {
                     );
                 }
             }
+
+            *threads_crossed.get_mut()
         }
 
-        let mut vals = [thread::current().id(); 10];
+        let mut vals = [0; 10];
 
-        increment(&mut threat_pool.scope(), &mut vals, thread::current().id());
+        let threads_crossed =
+            increment(&mut threat_pool.scope(), &mut vals, thread::current().id());
 
-        // Just in case this test fails.
-        panic!("thread IDs: {:?}", vals);
+        // Since there was no panic up to this point, this means that the
+        // thread boundary has not been crossed.
+        //
+        // Check that the work was done and pass the testt artificially.
+        if !threads_crossed {
+            assert_eq!(vals, [1; 10]);
+            panic!("panicked across threads");
+        }
     }
 }
