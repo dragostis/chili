@@ -111,7 +111,7 @@ impl<F> JobStack<F> {
     }
 
     /// It should only be called once.
-    pub unsafe fn take_once(self) -> F {
+    pub unsafe fn take_once(&self) -> F {
         // No `Job` has has been executed, therefore `self.f` has not yet been
         // `take`n.
         unsafe { ManuallyDrop::take(&mut *self.f.get()) }
@@ -144,9 +144,9 @@ impl<T> Job<T> {
         {
             // The `stack` is still alive.
             let stack = unsafe { &*(stack as *const JobStack<F>) };
-            // This is the first call to `take` the closure since
+            // This is the first call to `take_once` the closure since
             // `Job::execute` is called only after the job has been popped.
-            let f = unsafe { ManuallyDrop::take(&mut *stack.f.get()) };
+            let f = unsafe { stack.take_once() };
             // Before being popped, the `JobQueue` allocates and store a
             // `Future` in `self.fur_or_next` that should get passed here.
             let fut = unsafe { &*(fut as *const Future<T>) };
