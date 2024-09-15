@@ -276,13 +276,34 @@ impl<'s> Scope<'s> {
         self.context.heartbeats[self.worker_index].store(false, Ordering::Relaxed);
     }
 
-    fn join_inner<A, B, RA, RB>(&mut self, a: A, b: B) -> (RA, RB)
+    fn join_seq<A, B, RA, RB>(&mut self, a: A, b: B) -> (RA, RB)
     where
         A: FnOnce(&mut Scope<'_>) -> RA + Send,
         B: FnOnce(&mut Scope<'_>) -> RB + Send,
         RA: Send,
         RB: Send,
     {
+        let rb = b(self);
+        let ra = a(self);
+
+        (ra, rb)
+    }
+
+    fn join_heartbeat<A, B, RA, RB>(&mut self, a: A, b: B) -> (RA, RB)
+    where
+        A: FnOnce(&mut Scope<'_>) -> RA + Send,
+        B: FnOnce(&mut Scope<'_>) -> RB + Send,
+        RA: Send,
+        RB: Send,
+    {
+        let a = move |scope: &mut Scope<'_>| {
+            if scope.context.heartbeats[scope.worker_index].load(Ordering::Relaxed) {
+                scope.heartbeat();
+            }
+
+            a(scope)
+        };
+
         let stack = JobStack::new(a);
         let job = Job::new(&stack);
 
@@ -346,7 +367,7 @@ impl<'s> Scope<'s> {
         RA: Send,
         RB: Send,
     {
-        self.join_with_heartbeat_every::<16, _, _, _, _>(a, b)
+        self.join_with_heartbeat_every::<64, _, _, _, _>(a, b)
     }
 
     /// Runs `a` and `b` potentially in parallel on separate threads and
@@ -383,18 +404,10 @@ impl<'s> Scope<'s> {
     {
         self.join_count = self.join_count.wrapping_add(1) % TIMES;
 
-        if self.join_count == 0 {
-            let a = move |scope: &mut Scope<'_>| {
-                if scope.context.heartbeats[scope.worker_index].load(Ordering::Relaxed) {
-                    scope.heartbeat();
-                }
-
-                a(scope)
-            };
-
-            self.join_inner(a, b)
+        if self.join_count == 0 || self.job_queue.len() < 3 {
+            self.join_heartbeat(a, b)
         } else {
-            self.join_inner(a, b)
+            self.join_seq(a, b)
         }
     }
 }
@@ -613,7 +626,7 @@ mod tests {
                 _ => {
                     let (head, tail) = slice.split_at_mut(1);
 
-                    s.join(
+                    s.join_with_heartbeat_every::<1, _, _, _, _>(
                         |_| {
                             thread::sleep(Duration::from_micros(10));
                             head[0] += 1;

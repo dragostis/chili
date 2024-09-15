@@ -233,6 +233,7 @@ unsafe impl Send for Job {}
 pub struct JobQueue {
     sentinel: NonNull<Job>,
     tail: NonNull<Job>,
+    len: u32,
 }
 
 impl Default for JobQueue {
@@ -248,6 +249,7 @@ impl Default for JobQueue {
         Self {
             sentinel: root,
             tail: root,
+            len: 0,
         }
     }
 }
@@ -263,6 +265,10 @@ impl Drop for JobQueue {
 }
 
 impl JobQueue {
+    pub fn len(&self) -> u32 {
+        self.len
+    }
+
     /// Any `Job` pushed onto the queue should alive at least until it gets
     /// popped.
     pub unsafe fn push_back<T>(&mut self, job: &Job<T>) {
@@ -282,6 +288,8 @@ impl JobQueue {
             .set(Some(NonNull::from(next_tail).cast()));
         next_tail.prev.set(Some(current_tail.into()));
 
+        self.len += 1;
+
         self.tail = next_tail.into();
     }
 
@@ -300,6 +308,8 @@ impl JobQueue {
 
             current_tail.prev.set(None);
             prev_tail.fut_or_next.set(None);
+
+            self.len -= 1;
 
             self.tail = prev_tail.into();
         }
@@ -343,6 +353,8 @@ impl JobQueue {
             head.prev.set(None);
             head.fut_or_next
                 .set(Some(Box::leak(Box::new(Future::default())).into()));
+
+            self.len -= 1;
 
             // `self.sentinel`'s `fut_or_next` pointer can only be set by
             // `JobQueue::push_back` or by `JobQueue::pop_front` when it's set
