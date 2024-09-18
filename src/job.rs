@@ -48,12 +48,12 @@ impl<T> Future<T> {
 
                     thread::park();
 
-                    // Skip spininning after being woken up.
+                    // Skip yielding after being woken up.
                     continue;
                 }
                 Err(state) if state == Poll::Ready as u8 => {
-                    // `state` is `Poll::Ready` only after after
-                    // `Self::complete` releases the lock.
+                    // `state` is `Poll::Ready` only after `Self::complete`
+                    // releases the lock.
                     //
                     // Calling `Self::complete` when `state` is `Poll::Ready`
                     // cannot mutate `self.val`.
@@ -147,10 +147,11 @@ impl<T> Job<T> {
         {
             // The `stack` is still alive.
             let stack: &JobStack<F> = unsafe { stack.cast().as_ref() };
-            // This is the first call to `take_once` the closure since
-            // `Job::execute` is called only after the job has been popped.
+            // This is the first call to `take_once` since `Job::execute`
+            // (the only place where this harness is called) is called only
+            // after the job has been popped.
             let f = unsafe { stack.take_once() };
-            // Before being popped, the `JobQueue` allocates and store a
+            // Before being popped, the `JobQueue` allocates and stores a
             // `Future` in `self.fur_or_next` that should get passed here.
             let fut: &Future<T> = unsafe { fut.cast().as_ref() };
 
@@ -178,7 +179,7 @@ impl<T> Job<T> {
         self.fut_or_next
             .get()
             .map(|fut| {
-                // Before being popped, the `JobQueue` allocates and store a
+                // Before being popped, the `JobQueue` allocates and stores a
                 // `Future` in `self.fur_or_next` that should get passed here.
                 let fut = unsafe { fut.as_ref() };
                 fut.poll()
