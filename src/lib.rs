@@ -418,7 +418,7 @@ pub struct Config {
     /// The number of threads or `None` to use
     /// `std::thread::available_parallelism`.
     pub thread_count: Option<usize>,
-    /// The interaval between heartbeats on any particular thread.
+    /// The interval between heartbeats on any particular thread.
     pub heartbeat_interval: Duration,
 }
 
@@ -696,7 +696,7 @@ mod tests {
         // Since there was no panic up to this point, this means that the
         // thread boundary has not been crossed.
         //
-        // Check that the work was done and pass the testt artificially.
+        // Check that the work was done and pass the test artificially.
         if !threads_crossed {
             assert_eq!(vals, [1; 10]);
             panic!("panicked across threads");
