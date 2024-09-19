@@ -1,8 +1,16 @@
 #![deny(missing_docs)]
 #![deny(unsafe_op_in_unsafe_fn)]
 
+//! # spice-rs. A Rust port of [Spice], a low-overhead parallelization library
+//!
 //! A crate for very low-overhead fork-join workloads that can potentially be
 //! run in parallel.
+//!
+//! It works best in cases where there are many small computations and where it
+//! is expensive to estimate how many are left on the current branch in order
+//! to stop trying to share work across threads.
+//!
+//! [Spice]: https://github.com/judofyr/spice
 //!
 //! # Examples
 //!
