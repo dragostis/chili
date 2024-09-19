@@ -1,13 +1,21 @@
 #![deny(missing_docs)]
 #![deny(unsafe_op_in_unsafe_fn)]
 
+//! # chili. Rust port of [Spice], a low-overhead parallelization library
+//!
 //! A crate for very low-overhead fork-join workloads that can potentially be
 //! run in parallel.
+//!
+//! It works best in cases where there are many small computations and where it
+//! is expensive to estimate how many are left on the current branch in order
+//! to stop trying to share work across threads.
+//!
+//! [Spice]: https://github.com/judofyr/spice
 //!
 //! # Examples
 //!
 //! ```
-//! # use spice::{Scope, ThreadPool};
+//! # use chili::{Scope, ThreadPool};
 //! struct Node {
 //!     val: u64,
 //!     left: Option<Box<Node>>,
@@ -166,7 +174,7 @@ impl DerefMut for ThreadJobQueue<'_> {
 /// # Examples
 ///
 /// ```
-/// # use spice::ThreadPool;
+/// # use chili::ThreadPool;
 /// let mut tp = ThreadPool::new().unwrap();
 /// let mut s = tp.scope();
 ///
@@ -349,7 +357,7 @@ impl<'s> Scope<'s> {
     /// # Examples
     ///
     /// ```
-    /// # use spice::ThreadPool;
+    /// # use chili::ThreadPool;
     /// let mut tp = ThreadPool::new().unwrap();
     /// let mut s = tp.scope();
     ///
@@ -379,7 +387,7 @@ impl<'s> Scope<'s> {
     /// # Examples
     ///
     /// ```
-    /// # use spice::ThreadPool;
+    /// # use chili::ThreadPool;
     /// let mut tp = ThreadPool::new().unwrap();
     /// let mut s = tp.scope();
     ///
@@ -445,7 +453,7 @@ impl ThreadPool {
     /// # Examples
     ///
     /// ```
-    /// # use spice::ThreadPool;
+    /// # use chili::ThreadPool;
     /// let _tp = ThreadPool::new().unwrap();
     /// ```
     pub fn new() -> Option<Self> {
@@ -458,7 +466,7 @@ impl ThreadPool {
     ///
     /// ```
     /// # use std::time::Duration;
-    /// # use spice::{Config, ThreadPool};
+    /// # use chili::{Config, ThreadPool};
     /// let _tp = ThreadPool::with_config(Config {
     ///     thread_count: Some(1),
     ///     heartbeat_interval: Duration::from_micros(50),
@@ -504,7 +512,7 @@ impl ThreadPool {
     /// # Examples
     ///
     /// ```
-    /// # use spice::ThreadPool;
+    /// # use chili::ThreadPool;
     /// let mut tp = ThreadPool::new().unwrap();
     /// let mut s = tp.scope();
     ///

@@ -1,7 +1,15 @@
 [package]
-name = "spice"
+name = "chili"
+description = "low-overhead parallelization library"
 version = "0.1.0"
 edition = "2021"
+authors = ["Dragoș Tiselice <dragostiselice@gmail.com>"]
+repository = "https://github.com/dragostis/chili"
+documentation = "https://docs.rs/chili"
+keywords = ["join", "concurrency", "parallel", "spice"]
+categories = ["concurrency"]
+license = "MIT OR Apache-2.0"
+readme = "README.md"
 
 [features]
 bench = ["dep:divan", "dep:rayon"]
