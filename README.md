@@ -63,7 +63,7 @@ to the number of threads.
 
 | Number of nodes | Baseline | 1 thread | 2 threads | 4 threads | 8 threads |
 |----------------:|---------:|---------:|----------:|----------:|----------:|
-|            1023 |   1.8 ns |   3.5 ns |    3.5 µs |    3.5 µs |    3.5 µs |
+|            1023 |   1.8 ns |   3.5 ns |    3.5 ns |    3.5 ns |    3.5 ns |
 
 [Spice]: https://github.com/judofyr/spice
 [`rayon::join`]: https://docs.rs/rayon/latest/rayon/fn.join.html
