@@ -1,5 +1,8 @@
 # chili
 
+[![Crates.io](https://img.shields.io/crates/v/chili.svg)](https://crates.io/crates/chili)
+[![Docs](https://docs.rs/chili/badge.svg)](https://docs.rs/chili)
+
 ## Rust port of [Spice], a low-overhead parallelization library
 
 Very low-overhead parallelization primitive, almost identical to
