@@ -1,4 +1,4 @@
-# spice-rs
+# chili
 
 ## Rust port of [Spice], a low-overhead parallelization library
 
@@ -39,23 +39,23 @@ theoretical maximum, it's worth noting that the actual time per node is 0.8ns
 vs. a theoretical 1.8 / 8 = 0.2ns, if we're to compare against the 1K nodes
 case.
 
-| Number of nodes | Baseline |  Rayon   | spice-rs | Baseline / spice-rs |
-|----------------:|---------:|---------:|---------:|:-------------------:|
-|            1023 |   1.8 µs |  51.1 µs |   3.4 µs |      **x0.53**      |
-|        16777215 |  94.4 ms |  58.1 ms |  13.6 ms |      **x6.94**      |
-|       134217727 | 797.5 ms | 497.2 ms | 101.8 ms |      **x7.83**      |
+| Number of nodes | Baseline |  Rayon   |  chili   | Baseline / chili |
+|----------------:|---------:|---------:|---------:|:----------------:|
+|            1023 |   1.8 µs |  51.1 µs |   3.4 µs |     **x0.53**    |
+|        16777215 |  94.4 ms |  58.1 ms |  13.6 ms |     **x6.94**    |
+|       134217727 | 797.5 ms | 497.2 ms | 101.8 ms |     **x7.83**    |
 
 ### Apple M1 (8 cores)
 
-| Number of nodes | Baseline |  Rayon   | spice-rs | Baseline / spice-rs |
-|----------------:|---------:|---------:|---------:|:-------------------:|
-|            1023 |   1.6 µs |  29.2 µs |   3.5 µs |      **x0.46**      |
-|        16777215 |  39.4 ms |  40.5 ms |  11.2 ms |      **x3.51**      |
-|        67108863 | 156.5 ms | 167.1 ms |  44.3 ms |      **x3.53**      |
+| Number of nodes | Baseline |  Rayon   |  chili   | Baseline / chili |
+|----------------:|---------:|---------:|---------:|:----------------:|
+|            1023 |   1.6 µs |  29.2 µs |   3.5 µs |     **x0.46**    |
+|        16777215 |  39.4 ms |  40.5 ms |  11.2 ms |     **x3.51**    |
+|        67108863 | 156.5 ms | 167.1 ms |  44.3 ms |     **x3.53**    |
 
-### spice-rs overhead on AMD Ryzen 7 4800HS (8 cores)
+### chili overhead on AMD Ryzen 7 4800HS (8 cores)
 
-The oveerhead in the 1K nodes case remains approximately constant with respect
+The overhead in the 1K nodes case remains approximately constant with respect
 to the number of threads.
 
 | Number of nodes | Baseline | 1 thread | 2 threads | 4 threads | 8 threads |
