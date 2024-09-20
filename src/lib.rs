@@ -1,5 +1,6 @@
 #![deny(missing_docs)]
 #![deny(unsafe_op_in_unsafe_fn)]
+#![deny(clippy::undocumented_unsafe_blocks)]
 
 //! # chili. Rust port of [Spice], a low-overhead parallelization library
 //!
@@ -50,30 +51,54 @@
 //! ```
 
 use std::{
-    collections::{btree_map::Entry, BTreeMap},
+    cell::Cell,
+    collections::{btree_map::Entry, BTreeMap, HashMap},
     num::NonZero,
     ops::{Deref, DerefMut},
     panic,
     sync::{
         atomic::{AtomicBool, Ordering},
-        Arc, Barrier, Condvar, Mutex,
+        Arc, Barrier, Condvar, Mutex, Weak,
     },
     thread::{self, JoinHandle},
-    time::Duration,
+    time::{Duration, Instant},
 };
 
 mod job;
 
 use job::{Job, JobQueue, JobStack};
 
+#[derive(Debug)]
+struct Heartbeat {
+    is_set: Weak<AtomicBool>,
+    last_heartbeat: Cell<Instant>,
+}
+
 #[derive(Debug, Default)]
 struct LockContext {
     time: u64,
     is_stopping: bool,
     shared_jobs: BTreeMap<usize, (u64, Job)>,
+    heartbeats: HashMap<u64, Heartbeat>,
+    heartbeat_index: u64,
 }
 
 impl LockContext {
+    pub fn new_heartbeat(&mut self) -> Arc<AtomicBool> {
+        let is_set = Arc::new(AtomicBool::new(true));
+        let heartbeat = Heartbeat {
+            is_set: Arc::downgrade(&is_set),
+            last_heartbeat: Cell::new(Instant::now()),
+        };
+
+        let i = self.heartbeat_index;
+        self.heartbeats.insert(i, heartbeat);
+
+        self.heartbeat_index = i.checked_add(1).unwrap();
+
+        is_set
+    }
+
     pub fn pop_earliest_shared_job(&mut self) -> Option<Job> {
         self.shared_jobs
             .pop_first()
@@ -85,13 +110,15 @@ impl LockContext {
 struct Context {
     lock: Mutex<LockContext>,
     job_is_ready: Condvar,
-    heartbeats: Vec<AtomicBool>,
+    scope_created_from_thread_pool: Condvar,
 }
 
-fn execute_worker(context: Arc<Context>, worker_index: usize, barrier: Arc<Barrier>) -> Option<()> {
+fn execute_worker(context: Arc<Context>, barrier: Arc<Barrier>) -> Option<()> {
     let mut first_run = true;
 
     let mut job_queue = JobQueue::default();
+    let mut scope = Scope::new_from_worker(context.clone(), &mut job_queue);
+
     loop {
         let job = {
             let mut lock = context.lock.lock().unwrap();
@@ -99,14 +126,11 @@ fn execute_worker(context: Arc<Context>, worker_index: usize, barrier: Arc<Barri
         };
 
         if let Some(job) = job {
+            // SAFETY:
             // Any `Job` that was shared between threads is waited upon before
             // the `JobStack` exits scope.
             unsafe {
-                job.execute(&mut Scope::new_from_worker(
-                    context.clone(),
-                    worker_index,
-                    &mut job_queue,
-                ));
+                job.execute(&mut scope);
             }
         }
 
@@ -124,20 +148,47 @@ fn execute_worker(context: Arc<Context>, worker_index: usize, barrier: Arc<Barri
     Some(())
 }
 
-fn execute_heartbeat(context: Arc<Context>, heartbeat_interval: Duration) -> Option<()> {
-    let interval_between_workers = heartbeat_interval / context.heartbeats.len() as u32;
-
-    let mut i = 0;
+fn execute_heartbeat(
+    context: Arc<Context>,
+    heartbeat_interval: Duration,
+    num_workers: usize,
+) -> Option<()> {
     loop {
-        if context.lock.lock().ok()?.is_stopping {
-            break;
+        let interval_between_workers = {
+            let mut lock = context.lock.lock().ok()?;
+
+            if lock.is_stopping {
+                break;
+            }
+
+            if lock.heartbeats.len() == num_workers {
+                lock = context
+                    .scope_created_from_thread_pool
+                    .wait_while(lock, |l| l.heartbeats.len() > num_workers)
+                    .ok()?;
+            }
+
+            let now = Instant::now();
+            lock.heartbeats.retain(|_, h| {
+                h.is_set
+                    .upgrade()
+                    .inspect(|is_set| {
+                        if now.duration_since(h.last_heartbeat.get()) >= heartbeat_interval {
+                            is_set.store(true, Ordering::Relaxed);
+                            h.last_heartbeat.set(now);
+                        }
+                    })
+                    .is_some()
+            });
+
+            heartbeat_interval.checked_div(lock.heartbeats.len() as u32)
+        };
+
+        // If there are no heartbeats (`lock.heartbeats.len()` is 0), skip
+        // immediately to the next iteration of the loop to trigger the wait.
+        if let Some(interval_between_workers) = interval_between_workers {
+            thread::sleep(interval_between_workers);
         }
-
-        context.heartbeats.get(i)?.store(true, Ordering::Relaxed);
-
-        i = (i + 1) % context.heartbeats.len();
-
-        thread::sleep(interval_between_workers);
     }
 
     Some(())
@@ -188,36 +239,40 @@ impl DerefMut for ThreadJobQueue<'_> {
 #[derive(Debug)]
 pub struct Scope<'s> {
     context: Arc<Context>,
-    worker_index: usize,
     job_queue: ThreadJobQueue<'s>,
+    heartbeat: Arc<AtomicBool>,
     join_count: u8,
 }
 
 impl<'s> Scope<'s> {
-    fn new_from_thread_pool(thread_pool: &'s mut ThreadPool) -> Self {
-        let worker_index = thread_pool.context.heartbeats.len() - 1;
-
-        thread_pool.context.heartbeats[worker_index].store(true, Ordering::Relaxed);
+    fn new_from_thread_pool(thread_pool: &'s ThreadPool) -> Self {
+        let heartbeat = thread_pool.context.lock.lock().unwrap().new_heartbeat();
+        thread_pool
+            .context
+            .scope_created_from_thread_pool
+            .notify_one();
 
         Self {
             context: thread_pool.context.clone(),
-            worker_index,
             job_queue: ThreadJobQueue::Current(JobQueue::default()),
+            heartbeat,
             join_count: 0,
         }
     }
 
-    fn new_from_worker(
-        context: Arc<Context>,
-        worker_index: usize,
-        job_queue: &'s mut JobQueue,
-    ) -> Self {
+    fn new_from_worker(context: Arc<Context>, job_queue: &'s mut JobQueue) -> Self {
+        let heartbeat = context.lock.lock().unwrap().new_heartbeat();
+
         Self {
             context,
-            worker_index,
             job_queue: ThreadJobQueue::Worker(job_queue),
+            heartbeat,
             join_count: 0,
         }
+    }
+
+    fn heartbeat_id(&self) -> usize {
+        Arc::as_ptr(&self.heartbeat) as usize
     }
 
     fn wait_for_sent_job<T>(&mut self, job: &Job<T>) -> Option<thread::Result<T>> {
@@ -225,11 +280,12 @@ impl<'s> Scope<'s> {
             let mut lock = self.context.lock.lock().unwrap();
             if lock
                 .shared_jobs
-                .get(&self.worker_index)
+                .get(&self.heartbeat_id())
                 .map(|(_, shared_job)| job.eq(shared_job))
                 .is_some()
             {
-                if let Some((_, job)) = lock.shared_jobs.remove(&self.worker_index) {
+                if let Some((_, job)) = lock.shared_jobs.remove(&self.heartbeat_id()) {
+                    // SAFETY:
                     // Since the `Future` has already been allocated when
                     // popping from the queue, the `Job` needs manual dropping.
                     unsafe {
@@ -241,6 +297,7 @@ impl<'s> Scope<'s> {
             }
         }
 
+        // SAFETY:
         // For this `Job` to have crossed thread borders, it must have been
         // popped from the `JobQueue` and shared.
         while !unsafe { job.poll() } {
@@ -250,6 +307,7 @@ impl<'s> Scope<'s> {
             };
 
             if let Some(job) = job {
+                // SAFETY:
                 // Any `Job` that was shared between threads is waited upon
                 // before the `JobStack` exits scope.
                 unsafe {
@@ -260,6 +318,7 @@ impl<'s> Scope<'s> {
             }
         }
 
+        // SAFETY:
         // Any `Job` that was shared between threads is waited upon before the
         // `JobStack` exits scope.
         unsafe { job.wait() }
@@ -270,7 +329,8 @@ impl<'s> Scope<'s> {
         let mut lock = self.context.lock.lock().unwrap();
 
         let time = lock.time;
-        if let Entry::Vacant(e) = lock.shared_jobs.entry(self.worker_index) {
+        if let Entry::Vacant(e) = lock.shared_jobs.entry(self.heartbeat_id()) {
+            // SAFETY:
             // Any `Job` previously pushed onto the queue will be waited upon
             // and will be alive until that point.
             if let Some(job) = unsafe { self.job_queue.pop_front() } {
@@ -281,7 +341,7 @@ impl<'s> Scope<'s> {
             }
         }
 
-        self.context.heartbeats[self.worker_index].store(false, Ordering::Relaxed);
+        self.heartbeat.store(false, Ordering::Relaxed);
     }
 
     fn join_seq<A, B, RA, RB>(&mut self, a: A, b: B) -> (RA, RB)
@@ -305,7 +365,7 @@ impl<'s> Scope<'s> {
         RB: Send,
     {
         let a = move |scope: &mut Scope<'_>| {
-            if scope.context.heartbeats[scope.worker_index].load(Ordering::Relaxed) {
+            if scope.heartbeat.load(Ordering::Relaxed) {
                 scope.heartbeat();
             }
 
@@ -315,6 +375,7 @@ impl<'s> Scope<'s> {
         let stack = JobStack::new(a);
         let job = Job::new(&stack);
 
+        // SAFETY:
         // `job` is alive until the end of this scope.
         unsafe {
             self.job_queue.push_back(&job);
@@ -323,12 +384,14 @@ impl<'s> Scope<'s> {
         let rb = b(self);
 
         if job.is_in_queue() {
+            // SAFETY:
             // `job` is alive until the end of this scope and there has been no
             // other pop up to this point.
             unsafe {
                 self.job_queue.pop_back();
             }
 
+            // SAFETY:
             // Since the `job` was popped from the back of the queue, it cannot
             // take the closure out of the `JobStack` anymore.
             // `JobStack::take_once` is thus called only once.
@@ -337,6 +400,7 @@ impl<'s> Scope<'s> {
             let ra = match self.wait_for_sent_job(&job) {
                 Some(Ok(val)) => val,
                 Some(Err(e)) => panic::resume_unwind(e),
+                // SAFETY:
                 // Since the `job` didn't have the chance to be actually
                 // sent across threads, it cannot take the closure out of the
                 // `JobStack` anymore. `JobStack::take_once` is thus called
@@ -483,15 +547,15 @@ impl ThreadPool {
         let context = Arc::new(Context {
             lock: Mutex::new(LockContext::default()),
             job_is_ready: Condvar::new(),
-            heartbeats: (0..=thread_count).map(|_| AtomicBool::new(true)).collect(),
+            scope_created_from_thread_pool: Condvar::new(),
         });
 
         let worker_handles = (0..thread_count)
-            .map(|i| {
+            .map(|_| {
                 let context = context.clone();
                 let barrier = worker_barrier.clone();
                 thread::spawn(move || {
-                    execute_worker(context, i, barrier);
+                    execute_worker(context, barrier);
                 })
             })
             .collect();
@@ -502,7 +566,7 @@ impl ThreadPool {
             context: context.clone(),
             worker_handles,
             heartbeat_handle: Some(thread::spawn(move || {
-                execute_heartbeat(context, config.heartbeat_interval);
+                execute_heartbeat(context, config.heartbeat_interval, thread_count);
             })),
         })
     }
@@ -523,7 +587,7 @@ impl ThreadPool {
     ///
     /// assert_eq!(vals, [1; 2]);
     /// ```
-    pub fn scope(&mut self) -> Scope<'_> {
+    pub fn scope(&self) -> Scope<'_> {
         Scope::new_from_thread_pool(self)
     }
 }
@@ -536,6 +600,7 @@ impl Drop for ThreadPool {
             .expect("locking failed")
             .is_stopping = true;
         self.context.job_is_ready.notify_all();
+        self.context.scope_created_from_thread_pool.notify_one();
 
         for handle in self.worker_handles.drain(..) {
             handle.join().unwrap();
@@ -549,6 +614,8 @@ impl Drop for ThreadPool {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::atomic::AtomicU8;
+
     use super::*;
 
     use thread::ThreadId;
@@ -560,7 +627,7 @@ mod tests {
 
     #[test]
     fn join_basic() {
-        let mut threat_pool = ThreadPool::new().unwrap();
+        let threat_pool = ThreadPool::new().unwrap();
         let mut scope = threat_pool.scope();
 
         let mut a = 0;
@@ -573,7 +640,7 @@ mod tests {
 
     #[test]
     fn join_long() {
-        let mut threat_pool = ThreadPool::new().unwrap();
+        let threat_pool = ThreadPool::new().unwrap();
 
         fn increment(s: &mut Scope, slice: &mut [u32]) {
             match slice.len() {
@@ -596,7 +663,7 @@ mod tests {
 
     #[test]
     fn join_very_long() {
-        let mut threat_pool = ThreadPool::new().unwrap();
+        let threat_pool = ThreadPool::new().unwrap();
 
         fn increment(s: &mut Scope, slice: &mut [u32]) {
             match slice.len() {
@@ -620,7 +687,7 @@ mod tests {
 
     #[test]
     fn join_wait() {
-        let mut threat_pool = ThreadPool::with_config(Config {
+        let threat_pool = ThreadPool::with_config(Config {
             thread_count: Some(2),
             heartbeat_interval: Duration::from_micros(1),
             ..Default::default()
@@ -655,7 +722,7 @@ mod tests {
     #[test]
     #[should_panic(expected = "panicked across threads")]
     fn join_panic() {
-        let mut threat_pool = ThreadPool::with_config(Config {
+        let threat_pool = ThreadPool::with_config(Config {
             thread_count: Some(2),
             heartbeat_interval: Duration::from_micros(1),
         })
@@ -709,5 +776,33 @@ mod tests {
             assert_eq!(vals, [1; 10]);
             panic!("panicked across threads");
         }
+    }
+
+    #[test]
+    fn concurrent_scopes() {
+        const NUM_THREADS: u8 = 128;
+        let threat_pool = ThreadPool::with_config(Config {
+            thread_count: Some(4),
+            ..Default::default()
+        })
+        .unwrap();
+
+        let a = AtomicU8::new(0);
+        let b = AtomicU8::new(0);
+
+        thread::scope(|s| {
+            for _ in 0..NUM_THREADS {
+                s.spawn(|| {
+                    let mut scope = threat_pool.scope();
+                    scope.join(
+                        |_| a.fetch_add(1, Ordering::Relaxed),
+                        |_| b.fetch_add(1, Ordering::Relaxed),
+                    );
+                });
+            }
+        });
+
+        assert_eq!(a.load(Ordering::Relaxed), NUM_THREADS);
+        assert_eq!(b.load(Ordering::Relaxed), NUM_THREADS);
     }
 }
