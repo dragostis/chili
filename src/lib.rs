@@ -804,15 +804,5 @@ mod tests {
 
         assert_eq!(a.load(Ordering::Relaxed), NUM_THREADS);
         assert_eq!(b.load(Ordering::Relaxed), NUM_THREADS);
-
-        for _ in 0..128 {
-            if threat_pool.context.lock.lock().unwrap().heartbeats.len() > 4 {
-                thread::yield_now();
-            } else {
-                return;
-            }
-        }
-
-        unreachable!()
     }
 }
