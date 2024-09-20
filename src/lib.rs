@@ -181,10 +181,14 @@ fn execute_heartbeat(
                     .is_some()
             });
 
-            heartbeat_interval / lock.heartbeats.len() as u32
+            heartbeat_interval.checked_div(lock.heartbeats.len() as u32)
         };
 
-        thread::sleep(interval_between_workers);
+        // If there are no heartbeats (`lock.heartbeats.len()` is 0), skip
+        // immediately to the next iteration of the loop to trigger the wait.
+        if let Some(interval_between_workers) = interval_between_workers {
+            thread::sleep(interval_between_workers);
+        }
     }
 
     Some(())
