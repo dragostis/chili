@@ -774,7 +774,7 @@ mod tests {
         }
     }
 
-    // #[test]
+    #[test]
     fn concurrent_scopes() {
         const NUM_THREADS: u8 = 128;
         let threat_pool = ThreadPool::with_config(Config {
@@ -801,6 +801,14 @@ mod tests {
         assert_eq!(a.load(Ordering::Relaxed), NUM_THREADS);
         assert_eq!(b.load(Ordering::Relaxed), NUM_THREADS);
 
-        assert_eq!(threat_pool.context.lock.lock().unwrap().heartbeats.len(), 4);
+        for _ in 0..128 {
+            if threat_pool.context.lock.lock().unwrap().heartbeats.len() > 4 {
+                thread::yield_now();
+            } else {
+                return;
+            }
+        }
+
+        unreachable!()
     }
 }
