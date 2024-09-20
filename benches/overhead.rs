@@ -46,7 +46,7 @@ fn no_overhead(bencher: Bencher, nodes: (usize, usize)) {
     }
 
     let tree = Node::tree(nodes.0);
-    let mut thread_pool = ThreadPool::new().unwrap();
+    let thread_pool = ThreadPool::new().unwrap();
     let mut scope = thread_pool.scope();
 
     bencher.bench_local(move || {
@@ -66,7 +66,7 @@ fn chili_overhead(bencher: Bencher, nodes: (usize, usize)) {
     }
 
     let tree = Node::tree(nodes.0);
-    let mut thread_pool = ThreadPool::new().unwrap();
+    let thread_pool = ThreadPool::new().unwrap();
     let mut scope = thread_pool.scope();
 
     bencher.bench_local(move || {
