@@ -383,7 +383,7 @@ impl<'s> Scope<'s> {
 
         let rb = b(self);
 
-        if job.is_in_queue() {
+        if job.is_waiting() {
             // SAFETY:
             // `job` is alive until the end of this scope and there has been no
             // other pop up to this point.

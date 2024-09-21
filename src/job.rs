@@ -133,8 +133,7 @@ impl<F> JobStack<F> {
 pub struct Job<T = ()> {
     stack: NonNull<JobStack>,
     harness: unsafe fn(&mut Scope<'_>, NonNull<JobStack>, NonNull<Future>),
-    is_in_queue: Cell<bool>,
-    fut_or_next: Cell<Option<NonNull<Future<T>>>>,
+    fut: Cell<Option<NonNull<Future<T>>>>,
 }
 
 impl<T> Job<T> {
@@ -172,13 +171,12 @@ impl<T> Job<T> {
         Self {
             stack: NonNull::from(stack).cast(),
             harness: harness::<F, T>,
-            is_in_queue: Cell::new(false),
-            fut_or_next: Cell::new(None),
+            fut: Cell::new(None),
         }
     }
 
-    pub fn is_in_queue(&self) -> bool {
-        self.is_in_queue.get()
+    pub fn is_waiting(&self) -> bool {
+        self.fut.get().is_none()
     }
 
     pub fn eq(&self, other: &Job) -> bool {
@@ -188,7 +186,7 @@ impl<T> Job<T> {
     /// SAFETY:
     /// It should only be called after being popped from a `JobQueue`.
     pub unsafe fn poll(&self) -> bool {
-        self.fut_or_next
+        self.fut
             .get()
             .map(|fut| {
                 // SAFETY:
@@ -203,7 +201,7 @@ impl<T> Job<T> {
     /// SAFETY:
     /// It should only be called after being popped from a `JobQueue`.
     pub unsafe fn wait(&self) -> Option<thread::Result<T>> {
-        self.fut_or_next.get().and_then(|fut| {
+        self.fut.get().and_then(|fut| {
             // SAFETY:
             // Before being popped, the `JobQueue` allocates and stores a
             // `Future` in `self.fur_or_next` that should get passed here.
@@ -223,7 +221,7 @@ impl<T> Job<T> {
     /// It should only be called in the case where the job has been popped
     /// from the front and will not be `Job::Wait`ed.
     pub unsafe fn drop(&self) {
-        if let Some(fut) = self.fut_or_next.get() {
+        if let Some(fut) = self.fut.get() {
             // SAFETY:
             // Before being popped, the `JobQueue` allocates and store a
             // `Future` in `self.fur_or_next` that should get passed here.
@@ -243,7 +241,7 @@ impl Job {
         // Before being popped, the `JobQueue` allocates and store a
         // `Future` in `self.fur_or_next` that should get passed here.
         unsafe {
-            (self.harness)(scope, self.stack, self.fut_or_next.get().unwrap());
+            (self.harness)(scope, self.stack, self.fut.get().unwrap());
         }
     }
 }
@@ -266,28 +264,20 @@ impl JobQueue {
     /// Any `Job` pushed onto the queue should alive at least until it gets
     /// popped.
     pub unsafe fn push_back<T>(&mut self, job: &Job<T>) {
-        job.is_in_queue.set(true);
         let next_tail = unsafe { &*(job as *const Job<T> as *const Job) };
         self.0.push_back(NonNull::from(next_tail).cast());
     }
 
     pub fn pop_back(&mut self) {
-        let val = self.0.pop_back();
-        if let Some(job) = val {
-            // SAFETY:
-            // `Job` is still alive as per contract in `push_back`
-            unsafe {
-                job.as_ref().is_in_queue.set(false);
-            }
-        }
+        self.0.pop_back();
     }
 
     pub fn pop_front(&mut self) -> Option<Job> {
         let val = self.0.pop_front()?;
+        // SAFETY:
+        // `Job` is still alive as per contract in `push_back`
         let job = unsafe { val.as_ref() };
-        job.is_in_queue.set(false);
-        job.fut_or_next
-            .set(Some(Box::leak(Box::new(Future::default())).into()));
+        job.fut.set(Some(Box::leak(Box::new(Future::default())).into()));
         Some(job.clone())
     }
 }
