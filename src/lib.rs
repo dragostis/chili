@@ -678,6 +678,14 @@ mod tests {
     }
 
     #[test]
+    fn thread_pool_with_one_thread() {
+        let _tp = ThreadPool::with_config(Config {
+            thread_count: Some(NonZero::new(1).unwrap()),
+            ..Default::default()
+        });
+    }
+
+    #[test]
     fn join_basic() {
         let threat_pool = ThreadPool::new();
         let mut scope = threat_pool.scope();
