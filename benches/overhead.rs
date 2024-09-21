@@ -1,4 +1,4 @@
-use chili::{Scope, ThreadPool};
+use chili::Scope;
 use divan::Bencher;
 
 struct Node {
@@ -46,8 +46,7 @@ fn no_overhead(bencher: Bencher, nodes: (usize, usize)) {
     }
 
     let tree = Node::tree(nodes.0);
-    let thread_pool = ThreadPool::new().unwrap();
-    let mut scope = thread_pool.scope();
+    let mut scope = Scope::global();
 
     bencher.bench_local(move || {
         assert_eq!(sum(&tree, &mut scope), nodes.1 as u64);
@@ -66,8 +65,7 @@ fn chili_overhead(bencher: Bencher, nodes: (usize, usize)) {
     }
 
     let tree = Node::tree(nodes.0);
-    let thread_pool = ThreadPool::new().unwrap();
-    let mut scope = thread_pool.scope();
+    let mut scope = Scope::global();
 
     bencher.bench_local(move || {
         assert_eq!(sum(&tree, &mut scope), nodes.1 as u64);
