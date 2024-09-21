@@ -283,13 +283,8 @@ impl JobQueue {
     }
 
     pub fn pop_front(&mut self) -> Option<Job> {
-        let val = self.0.pop_front();
-        let job = match val {
-            // SAFETY:
-            // `Job` is still alive as per contract in `push_back`
-            Some(j) => unsafe { j.as_ref() },
-            None => return None,
-        };
+        let val = self.0.pop_front()?;
+        let job = unsafe { val.as_ref() };
         job.is_in_queue.set(false);
         job.fut_or_next
             .set(Some(Box::leak(Box::new(Future::default())).into()));
