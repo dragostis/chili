@@ -330,10 +330,7 @@ impl<'s> Scope<'s> {
 
         let time = lock.time;
         if let Entry::Vacant(e) = lock.shared_jobs.entry(self.heartbeat_id()) {
-            // SAFETY:
-            // Any `Job` previously pushed onto the queue will be waited upon
-            // and will be alive until that point.
-            if let Some(job) = unsafe { self.job_queue.pop_front() } {
+            if let Some(job) = self.job_queue.pop_front() {
                 e.insert((time, job));
 
                 lock.time += 1;
@@ -384,12 +381,7 @@ impl<'s> Scope<'s> {
         let rb = b(self);
 
         if job.is_waiting() {
-            // SAFETY:
-            // `job` is alive until the end of this scope and there has been no
-            // other pop up to this point.
-            unsafe {
-                self.job_queue.pop_back();
-            }
+            self.job_queue.pop_back();
 
             // SAFETY:
             // Since the `job` was popped from the back of the queue, it cannot

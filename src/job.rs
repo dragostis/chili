@@ -264,8 +264,7 @@ impl JobQueue {
     /// Any `Job` pushed onto the queue should alive at least until it gets
     /// popped.
     pub unsafe fn push_back<T>(&mut self, job: &Job<T>) {
-        let next_tail = unsafe { &*(job as *const Job<T> as *const Job) };
-        self.0.push_back(NonNull::from(next_tail).cast());
+        self.0.push_back(NonNull::from(job).cast());
     }
 
     pub fn pop_back(&mut self) {
@@ -273,11 +272,12 @@ impl JobQueue {
     }
 
     pub fn pop_front(&mut self) -> Option<Job> {
-        let val = self.0.pop_front()?;
         // SAFETY:
-        // `Job` is still alive as per contract in `push_back`
-        let job = unsafe { val.as_ref() };
-        job.fut.set(Some(Box::leak(Box::new(Future::default())).into()));
+        // `Job` is still alive as per contract in `push_back`.
+        let job = unsafe { self.0.pop_front()?.as_ref() };
+        job.fut
+            .set(Some(Box::leak(Box::new(Future::default())).into()));
+
         Some(job.clone())
     }
 }
