@@ -1,3 +1,5 @@
+use std::hint::black_box;
+
 use chili::Scope;
 use divan::Bencher;
 
@@ -49,7 +51,7 @@ fn no_overhead(bencher: Bencher, nodes: (usize, usize)) {
     let mut scope = Scope::global();
 
     bencher.bench_local(move || {
-        assert_eq!(sum(&tree, &mut scope), nodes.1 as u64);
+        assert_eq!(sum(black_box(&tree), &mut scope), nodes.1 as u64);
     });
 }
 
@@ -68,7 +70,7 @@ fn chili_overhead(bencher: Bencher, nodes: (usize, usize)) {
     let mut scope = Scope::global();
 
     bencher.bench_local(move || {
-        assert_eq!(sum(&tree, &mut scope), nodes.1 as u64);
+        assert_eq!(sum(black_box(&tree), &mut scope), nodes.1 as u64);
     });
 }
 
@@ -86,7 +88,7 @@ fn rayon_overhead(bencher: Bencher, nodes: (usize, usize)) {
     let tree = Node::tree(nodes.0);
 
     bencher.bench_local(move || {
-        assert_eq!(sum(&tree), nodes.1 as u64);
+        assert_eq!(sum(black_box(&tree)), nodes.1 as u64);
     });
 }
 
