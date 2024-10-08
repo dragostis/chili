@@ -14,8 +14,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@1.81.0
       - uses: Swatinem/rust-cache@v2
-      - run: cargo check --all --no-default-features
-      - run: cargo check --all --all-features
+      - run: cargo check --all
 
   test:
     name: Test
@@ -24,8 +23,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@1.81.0
       - uses: Swatinem/rust-cache@v2
-      - run: cargo test --all --no-default-features
-      - run: cargo test --all --all-features
+      - run: cargo test --all
 
   fmt:
     name: Rustfmt
@@ -46,8 +44,7 @@ jobs:
         with:
           components: clippy
       - uses: Swatinem/rust-cache@v2
-      - run: cargo clippy --all --no-default-features -- -D warnings
-      - run: cargo clippy --all --all-features -- -D warnings
+      - run: cargo clippy --all
 
   miri:
     name: Miri
