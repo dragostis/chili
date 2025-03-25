@@ -54,7 +54,7 @@ use std::{
     ops::{Deref, DerefMut},
     panic,
     sync::{
-        atomic::{AtomicBool, Ordering},
+        atomic::{AtomicBool, AtomicUsize, Ordering},
         Arc, Barrier, Condvar, Mutex, OnceLock, Weak,
     },
     thread::{self, JoinHandle},
@@ -107,7 +107,13 @@ impl LockContext {
 struct Context {
     lock: Mutex<LockContext>,
     job_is_ready: Condvar,
+
+    /// Triggers when the number of shared jobs changes from 0 to 1.
+    shared_job_count_changed: Condvar,
+
     scope_created_from_thread_pool: Condvar,
+
+    shared_job_count: AtomicUsize,
 }
 
 fn execute_worker(context: Arc<Context>, barrier: Arc<Barrier>) -> Option<()> {
@@ -153,6 +159,14 @@ fn execute_heartbeat(
     loop {
         let interval_between_workers = {
             let mut lock = context.lock.lock().ok()?;
+
+            // If there are no shared jobs, wait for a new one to be added.
+            if context.shared_job_count.load(Ordering::SeqCst) == 0 {
+                if lock.is_stopping {
+                    break;
+                }
+                lock = context.shared_job_count_changed.wait(lock).ok()?;
+            }
 
             if lock.is_stopping {
                 break;
@@ -343,6 +357,7 @@ impl<'s> Scope<'s> {
                 e.insert((time, job));
 
                 lock.time += 1;
+
                 self.context.job_is_ready.notify_one();
             }
         }
@@ -387,7 +402,13 @@ impl<'s> Scope<'s> {
             self.job_queue.push_back(&job);
         }
 
+        if self.context.shared_job_count.fetch_add(1, Ordering::SeqCst) == 0 {
+            self.context.shared_job_count_changed.notify_one();
+        }
+
         let rb = b(self);
+
+        self.context.shared_job_count.fetch_sub(1, Ordering::SeqCst);
 
         if job.is_waiting() {
             self.job_queue.pop_back();
@@ -545,7 +566,9 @@ impl ThreadPool {
         let context = Arc::new(Context {
             lock: Mutex::new(LockContext::default()),
             job_is_ready: Condvar::new(),
+            shared_job_count_changed: Condvar::new(),
             scope_created_from_thread_pool: Condvar::new(),
+            shared_job_count: AtomicUsize::new(0),
         });
 
         let worker_handles = (0..thread_count)
@@ -645,6 +668,7 @@ impl Drop for ThreadPool {
             .is_stopping = true;
         self.context.job_is_ready.notify_all();
         self.context.scope_created_from_thread_pool.notify_one();
+        self.context.shared_job_count_changed.notify_one();
 
         for handle in self.worker_handles.drain(..) {
             handle.join().unwrap();
