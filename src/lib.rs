@@ -161,7 +161,9 @@ fn execute_heartbeat(
             if lock.heartbeats.len() == num_workers {
                 lock = context
                     .scope_created_from_thread_pool
-                    .wait_while(lock, |l| l.heartbeats.len() > num_workers)
+                    .wait_while(lock, |l| {
+                        l.heartbeats.len() == num_workers && !l.is_stopping
+                    })
                     .ok()?;
             }
 
