@@ -58,4 +58,4 @@ jobs:
       - uses: taiki-e/install-action@nextest
       - run: cargo +nightly miri setup
       - run: cargo +nightly miri nextest run -j8 -E 'not (test(join_very_long))'
-      - run: cargo +nightly miri test --many-seeds=0..16 -- join_wait
+      - run: MIRIFLAGS=-Zmiri-many-seeds cargo +nightly miri test --lib -- join_wait
