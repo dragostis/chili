@@ -152,19 +152,15 @@ fn execute_heartbeat(
 ) -> Option<()> {
     loop {
         let interval_between_workers = {
-            let mut lock = context.lock.lock().ok()?;
+            let mut lock = context
+                .scope_created_from_thread_pool
+                .wait_while(context.lock.lock().ok()?, |l| {
+                    l.heartbeats.len() == num_workers && !l.is_stopping
+                })
+                .ok()?;
 
             if lock.is_stopping {
                 break;
-            }
-
-            if lock.heartbeats.len() == num_workers {
-                lock = context
-                    .scope_created_from_thread_pool
-                    .wait_while(lock, |l| {
-                        l.heartbeats.len() == num_workers && !l.is_stopping
-                    })
-                    .ok()?;
             }
 
             let now = Instant::now();
