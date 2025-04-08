@@ -288,8 +288,7 @@ impl<'s> Scope<'s> {
             if lock
                 .shared_jobs
                 .get(&self.heartbeat_id())
-                .map(|(_, shared_job)| job.eq(shared_job))
-                .is_some()
+                .is_some_and(|(_, shared_job)| job.eq(shared_job))
             {
                 if let Some((_, job)) = lock.shared_jobs.remove(&self.heartbeat_id()) {
                     // SAFETY:
