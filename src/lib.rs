@@ -285,18 +285,13 @@ impl<'s> Scope<'s> {
     fn wait_for_sent_job<T>(&mut self, job: &Job<T>) -> Option<thread::Result<T>> {
         {
             let mut lock = self.context.lock.lock().unwrap();
-            if lock
-                .shared_jobs
-                .get(&self.heartbeat_id())
-                .is_some_and(|(_, shared_job)| job.eq(shared_job))
-            {
-                if let Some((_, job)) = lock.shared_jobs.remove(&self.heartbeat_id()) {
-                    // SAFETY:
-                    // Since the `Future` has already been allocated when
-                    // popping from the queue, the `Job` needs manual dropping.
-                    unsafe {
-                        job.drop();
-                    }
+
+            if let Some((_, job)) = lock.shared_jobs.remove(&self.heartbeat_id()) {
+                // SAFETY:
+                // Since the `Future` has already been allocated when
+                // popping from the queue, the `Job` needs manual dropping.
+                unsafe {
+                    job.drop();
                 }
 
                 return None;

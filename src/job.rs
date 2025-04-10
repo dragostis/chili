@@ -179,10 +179,6 @@ impl<T> Job<T> {
         self.fut.get().is_none()
     }
 
-    pub fn eq(&self, other: &Job) -> bool {
-        self.stack == other.stack
-    }
-
     /// SAFETY:
     /// It should only be called after being popped from a `JobQueue`.
     pub unsafe fn poll(&self) -> bool {
