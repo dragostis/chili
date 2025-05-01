@@ -54,7 +54,7 @@ use std::{
     panic,
     sync::{
         atomic::{AtomicBool, Ordering},
-        Arc, Barrier, Condvar, Mutex, OnceLock, Weak,
+        Arc, Barrier, Condvar, LockResult, Mutex, OnceLock, PoisonError, Weak,
     },
     thread::{self, JoinHandle},
     time::{Duration, Instant},
@@ -109,39 +109,38 @@ struct Context {
     scope_created_from_thread_pool: Condvar,
 }
 
-fn execute_worker(context: Arc<Context>, barrier: Arc<Barrier>) -> Option<()> {
-    let mut first_run = true;
-
+fn execute_worker(context: Arc<Context>, barrier: Arc<Barrier>) -> LockResult<()> {
     let mut job_queue = JobQueue::default();
     let mut scope = Scope::new_from_worker(context.clone(), &mut job_queue);
 
+    barrier.wait();
+
+    let mut lock = context.lock.lock().map_err(|_| PoisonError::new(()))?;
     loop {
-        let job = {
-            let mut lock = context.lock.lock().unwrap();
-            lock.pop_earliest_shared_job()
-        };
-
-        if let Some(job) = job {
-            // SAFETY:
-            // Any `Job` that was shared between threads is waited upon before
-            // the `JobStack` exits scope.
-            unsafe {
-                job.execute(&mut scope);
-            }
-        }
-
-        if first_run {
-            first_run = false;
-            barrier.wait();
-        };
-
-        let lock = context.lock.lock().ok()?;
-        if lock.is_stopping || context.job_is_ready.wait(lock).is_err() {
+        if lock.is_stopping {
             break;
         }
+        lock = context
+            .job_is_ready
+            .wait(lock)
+            .map_err(|_| PoisonError::new(()))?;
+        let job = lock.pop_earliest_shared_job();
+        let Some(job) = job else {
+            // preserve lock to immediatelly wait for fresh jobs
+            continue;
+        };
+
+        drop(lock);
+        // SAFETY:
+        // Any `Job` that was shared between threads is waited upon before
+        // the `JobStack` exits scope.
+        unsafe {
+            job.execute(&mut scope);
+        }
+        lock = context.lock.lock().map_err(|_| PoisonError::new(()))?
     }
 
-    Some(())
+    Ok(())
 }
 
 fn execute_heartbeat(
@@ -529,7 +528,7 @@ impl ThreadPool {
                 let context = context.clone();
                 let barrier = worker_barrier.clone();
                 thread::spawn(move || {
-                    execute_worker(context, barrier);
+                    let _ = execute_worker(context, barrier);
                 })
             })
             .collect();
