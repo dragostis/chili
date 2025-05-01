@@ -334,10 +334,8 @@ impl<'s> Scope<'s> {
 
     fn join_seq<A, B, RA, RB>(&mut self, a: A, b: B) -> (RA, RB)
     where
-        A: FnOnce(&mut Scope<'_>) -> RA + Send,
-        B: FnOnce(&mut Scope<'_>) -> RB + Send,
-        RA: Send,
-        RB: Send,
+        A: FnOnce(&mut Scope<'_>) -> RA,
+        B: FnOnce(&mut Scope<'_>) -> RB,
     {
         let rb = b(self);
         let ra = a(self);
@@ -348,9 +346,8 @@ impl<'s> Scope<'s> {
     fn join_heartbeat<A, B, RA, RB>(&mut self, a: A, b: B) -> (RA, RB)
     where
         A: FnOnce(&mut Scope<'_>) -> RA + Send,
-        B: FnOnce(&mut Scope<'_>) -> RB + Send,
+        B: FnOnce(&mut Scope<'_>) -> RB,
         RA: Send,
-        RB: Send,
     {
         let stack = JobStack::new(a);
         let job = Job::new(&stack);
@@ -409,9 +406,8 @@ impl<'s> Scope<'s> {
     pub fn join<A, B, RA, RB>(&mut self, a: A, b: B) -> (RA, RB)
     where
         A: FnOnce(&mut Scope<'_>) -> RA + Send,
-        B: FnOnce(&mut Scope<'_>) -> RB + Send,
+        B: FnOnce(&mut Scope<'_>) -> RB,
         RA: Send,
-        RB: Send,
     {
         self.join_with_heartbeat_every::<64, _, _, _, _>(a, b)
     }
@@ -442,9 +438,8 @@ impl<'s> Scope<'s> {
     ) -> (RA, RB)
     where
         A: FnOnce(&mut Scope<'_>) -> RA + Send,
-        B: FnOnce(&mut Scope<'_>) -> RB + Send,
+        B: FnOnce(&mut Scope<'_>) -> RB,
         RA: Send,
-        RB: Send,
     {
         self.join_count = self.join_count.wrapping_add(1) % TIMES;
 
