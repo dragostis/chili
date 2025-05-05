@@ -77,6 +77,7 @@ struct LockContext {
     shared_jobs: BTreeMap<usize, (u64, JobShared)>,
     heartbeats: HashMap<u64, Heartbeat>,
     heartbeat_index: u64,
+    waiting_workers: usize,
 }
 
 impl LockContext {
@@ -135,8 +136,19 @@ fn execute_worker(context: Arc<Context>, barrier: Arc<Barrier>) -> Option<()> {
             barrier.wait();
         };
 
-        let lock = context.lock.lock().ok()?;
-        if lock.is_stopping || context.job_is_ready.wait(lock).is_err() {
+        let mut lock = context.lock.lock().ok()?;
+
+        if lock.is_stopping {
+            break;
+        }
+
+        lock.waiting_workers += 1;
+
+        let is_poisoned = context.job_is_ready.wait(lock).is_err();
+
+        context.lock.lock().ok()?.waiting_workers -= 1;
+
+        if is_poisoned {
             break;
         }
     }
@@ -329,7 +341,8 @@ impl<'s> Scope<'s> {
             }
         }
 
-        self.heartbeat.store(false, Ordering::Relaxed);
+        self.heartbeat
+            .store(lock.waiting_workers != 0, Ordering::Relaxed);
     }
 
     fn join_seq<A, B, RA, RB>(&mut self, a: A, b: B) -> (RA, RB)
